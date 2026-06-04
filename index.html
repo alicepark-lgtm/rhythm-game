@@ -16,50 +16,34 @@
     2. "Realtime Database" 메뉴에서 데이터베이스 생성 (테스트 모드)
     3. 프로젝트 설정 > 웹 앱 추가 후 아래 firebaseConfig 값을 교체하세요
   ====================================================== -->
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getDatabase, ref, push, onValue, query, orderByChild, limitToLast } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getDatabase, ref, push, onValue, query, orderByChild, limitToLast } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
-    // ⬇️ 여기에 본인의 Firebase 프로젝트 설정값을 입력하세요
-// Import the functions you need from the SDKs you need
-import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
+  const firebaseConfig = {
+    apiKey: "AIzaSyAjhmQD1XZZf6i2LSblfQEKTrErss2eO5Y",
+    authDomain: "gesture-rhythm-game.firebaseapp.com",
+    databaseURL: "https://gesture-rhythm-game-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "gesture-rhythm-game",
+    storageBucket: "gesture-rhythm-game.firebasestorage.app",
+    messagingSenderId: "545833118575",
+    appId: "1:545833118575:web:381500fe4d8382beb8169a"
+  };
 
-// Your web app's Firebase configuration
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
-const firebaseConfig = {
-  apiKey: "AIzaSyAjhmQD1XZZf6i2LSblfQEKTrErss2eO5Y",
-  authDomain: "gesture-rhythm-game.firebaseapp.com",
-  databaseURL: "https://gesture-rhythm-game-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "gesture-rhythm-game",
-  storageBucket: "gesture-rhythm-game.firebasestorage.app",
-  messagingSenderId: "545833118575",
-  appId: "1:545833118575:web:381500fe4d8382beb8169a",
-  measurementId: "G-HYV4QR9J8M"
-};
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
+  window._fbDb = db;
+  window._fbRef = ref;
+  window._fbPush = push;
+  window._fbOnValue = onValue;
+  window._fbQuery = query;
+  window._fbOrderByChild = orderByChild;
+  window._fbLimitToLast = limitToLast;
+  window._fbReady = true;
 
-    const app = initializeApp(firebaseConfig);
-    const db = getDatabase(app);
-
-    // 전역에서 접근 가능하도록 window에 노출
-    window._fbDb = db;
-    window._fbRef = ref;
-    window._fbPush = push;
-    window._fbOnValue = onValue;
-    window._fbQuery = query;
-    window._fbOrderByChild = orderByChild;
-    window._fbLimitToLast = limitToLast;
-    window._fbReady = true;
-
-    // Firebase 준비 완료 이벤트
-    window.dispatchEvent(new Event('firebase-ready'));
-  </script>
+  window.dispatchEvent(new Event('firebase-ready'));
+</script>
 
   <style>
     @keyframes drop {

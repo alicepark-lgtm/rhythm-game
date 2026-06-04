@@ -1,0 +1,1129 @@
+
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>티처블 머신 제스처 리듬 게임</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8.3/dist/teachablemachine-image.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/pose@0.8.3/dist/teachablemachine-pose.min.js"></script>
+
+  <!-- =====================================================
+    Firebase 설정 방법:
+    1. https://console.firebase.google.com/ 에서 새 프로젝트 생성
+    2. "Realtime Database" 메뉴에서 데이터베이스 생성 (테스트 모드)
+    3. 프로젝트 설정 > 웹 앱 추가 후 아래 firebaseConfig 값을 교체하세요
+  ====================================================== -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getDatabase, ref, push, onValue, query, orderByChild, limitToLast } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+    // ⬇️ 여기에 본인의 Firebase 프로젝트 설정값을 입력하세요
+// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+import { getAnalytics } from "firebase/analytics";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyAjhmQD1XZZf6i2LSblfQEKTrErss2eO5Y",
+  authDomain: "gesture-rhythm-game.firebaseapp.com",
+  databaseURL: "https://gesture-rhythm-game-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "gesture-rhythm-game",
+  storageBucket: "gesture-rhythm-game.firebasestorage.app",
+  messagingSenderId: "545833118575",
+  appId: "1:545833118575:web:381500fe4d8382beb8169a",
+  measurementId: "G-HYV4QR9J8M"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    // 전역에서 접근 가능하도록 window에 노출
+    window._fbDb = db;
+    window._fbRef = ref;
+    window._fbPush = push;
+    window._fbOnValue = onValue;
+    window._fbQuery = query;
+    window._fbOrderByChild = orderByChild;
+    window._fbLimitToLast = limitToLast;
+    window._fbReady = true;
+
+    // Firebase 준비 완료 이벤트
+    window.dispatchEvent(new Event('firebase-ready'));
+  </script>
+
+  <style>
+    @keyframes drop {
+      0% { transform: translateY(-20px); opacity: 0; }
+      10% { opacity: 1; }
+      90% { opacity: 1; }
+      100% { transform: translateY(320px); opacity: 0; }
+    }
+    .note-animation {
+      animation: drop 3s linear forwards;
+    }
+    .mirror {
+      transform: rotateY(180deg);
+      -webkit-transform: rotateY(180deg);
+    }
+    @keyframes rank-in {
+      from { opacity: 0; transform: translateX(-10px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    .rank-row-anim {
+      animation: rank-in 0.3s ease forwards;
+    }
+  </style>
+</head>
+<body class="bg-slate-900 text-white min-h-screen flex flex-col font-sans overflow-x-hidden">
+
+  <!-- 헤더 -->
+  <header class="bg-slate-800 border-b border-slate-700 py-4 px-6 flex flex-col md:flex-row justify-between items-center gap-4 shadow-lg">
+    <div class="flex items-center space-x-3">
+      <div class="bg-indigo-600 p-2 rounded-lg">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+        </svg>
+      </div>
+      <div>
+        <h1 class="text-xl font-bold tracking-wider text-indigo-400">제스처 리듬 스타!</h1>
+        <p class="text-xs text-slate-400">Teachable Machine 멀티 제스처 타임어택 게임</p>
+      </div>
+    </div>
+
+    <div class="flex items-center space-x-2 w-full md:w-auto max-w-lg">
+      <span class="text-xs text-slate-300 font-semibold shrink-0">로드된 URL:</span>
+      <span id="current-loaded-url" class="text-xs font-mono text-emerald-400 truncate max-w-[200px] md:max-w-xs bg-slate-950 px-2 py-1 rounded border border-slate-700">없음</span>
+    </div>
+
+    <div class="text-sm bg-slate-700 px-4 py-2 rounded-full border border-slate-600 flex items-center space-x-2">
+      <span>엔진 모드:</span>
+      <span id="model-mode-badge" class="text-yellow-400 font-bold">감지 대기 중</span>
+    </div>
+  </header>
+
+  <!-- 메인 레이아웃 -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+    <!-- 왼쪽: 게임 플레이 영역 (7컬럼) -->
+    <section class="lg:col-span-7 flex flex-col space-y-4">
+
+      <!-- 게임 스코어, 남은 시간, 콤보 -->
+      <div class="bg-slate-800 rounded-2xl p-4 flex justify-between items-center border border-slate-700 shadow-md">
+        <div class="text-center px-4">
+          <p class="text-xs text-slate-400 uppercase tracking-widest font-bold">SCORE</p>
+          <p id="score-display" class="text-3xl font-extrabold text-indigo-400">000,000</p>
+        </div>
+        <div class="text-center px-6 border-l border-r border-slate-700">
+          <p class="text-xs text-slate-400 uppercase tracking-widest font-bold">TIME LIMIT</p>
+          <p id="timer-display" class="text-3xl font-extrabold text-emerald-400">60.0s</p>
+        </div>
+        <div class="text-center px-4">
+          <p class="text-xs text-slate-400 uppercase tracking-widest font-bold">COMBO</p>
+          <p id="combo-display" class="text-3xl font-extrabold text-pink-500">0</p>
+        </div>
+        <div class="text-center px-4 border-l border-slate-700">
+          <p class="text-xs text-slate-400 uppercase tracking-widest font-bold">MAX COMBO</p>
+          <p id="max-combo-display" class="text-xl font-bold text-yellow-500">0</p>
+        </div>
+      </div>
+
+      <!-- 핵심 게임 화면 -->
+      <div class="relative bg-slate-950 rounded-3xl h-[420px] border-2 border-indigo-500/50 shadow-2xl overflow-hidden flex flex-col justify-between p-6">
+
+        <div class="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_50%,#000_70%,transparent_100%)] opacity-30"></div>
+
+        <!-- 게임 오버레이 (시작 / 종료 화면) -->
+        <div id="game-overlay" class="absolute inset-0 bg-slate-950/95 z-20 flex flex-col justify-center items-center p-6 text-center overflow-y-auto">
+          <div class="max-w-md w-full bg-slate-800 p-8 rounded-3xl border border-indigo-500/40 shadow-2xl space-y-6 my-auto">
+            <div class="space-y-2">
+              <h2 id="overlay-title" class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-pink-500">
+                티처블 머신 연동하기 🎮
+              </h2>
+              <p id="overlay-desc" class="text-slate-300 text-xs leading-relaxed">
+                게임 실행을 위해 사용자님의 티처블 머신 공유 모델 주소를 입력한 뒤 아래 버튼을 클릭해 주세요!
+              </p>
+            </div>
+
+            <!-- 닉네임 등록 폼 -->
+            <div id="nickname-input-box" class="hidden bg-slate-900/80 p-4 rounded-xl border border-slate-700/60 text-left space-y-3">
+              <p class="text-xs font-bold text-yellow-400">🏆 명예의 전당 등록하기</p>
+              <div class="flex gap-2">
+                <input id="input-nickname" type="text" maxlength="8" placeholder="닉네임 입력 (최대 8자)" class="flex-1 bg-slate-950 text-white border border-slate-600 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                <button id="btn-save-score" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-xs font-bold transition">등록</button>
+              </div>
+              <p id="save-status-msg" class="text-[10px] text-slate-500 hidden"></p>
+            </div>
+
+            <!-- 모델 주소 입력 -->
+            <div id="url-input-container" class="text-left space-y-1.5">
+              <label class="text-[11px] font-bold text-slate-400 tracking-wider">TEACHABLE MACHINE MODEL URL</label>
+              <input id="input-model-url" type="text" value="https://teachablemachine.withgoogle.com/models/G0sNxPTo-/" placeholder="https://teachablemachine.withgoogle.com/models/..." class="w-full bg-slate-950 text-slate-200 border-2 border-slate-700 focus:border-indigo-500 rounded-xl px-4 py-2.5 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+            </div>
+
+            <!-- 카메라 및 모델 로드 버튼 -->
+            <div id="load-buttons-container" class="space-y-2">
+              <button id="btn-load-model" class="w-full py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-bold rounded-xl shadow-lg transition duration-200 flex justify-center items-center space-x-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                <span>카메라 켜기 및 모델 로드</span>
+              </button>
+              <div id="loading-spinner" class="hidden flex items-center justify-center space-x-2 text-indigo-400 py-1 text-xs">
+                <div class="animate-spin rounded-full h-3.5 w-3.5 border-2 border-indigo-400 border-t-transparent"></div>
+                <span id="loading-status-text">모델 연동 장치 가동 중...</span>
+              </div>
+            </div>
+
+            <button id="btn-start-game" disabled class="w-full py-3 bg-slate-600 text-slate-400 font-bold rounded-xl cursor-not-allowed transition duration-300">
+              모델 연동을 진행해주세요
+            </button>
+
+            <div id="error-guide" class="hidden text-left p-3.5 bg-red-950/60 border border-red-800 text-red-300 rounded-xl text-[11px] space-y-1">
+              <p class="font-bold text-red-400">⚠️ 로딩 오류 해결책:</p>
+              <ul class="list-disc list-inside space-y-0.5">
+                <li>입력하신 주소가 유효한 티처블 머신 공유 URL 형태인지 체크하세요.</li>
+                <li>브라우저 카메라 액세스 승인 여부를 재조정해 보세요.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- 판정 텍스트 -->
+        <div class="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 text-center pointer-events-none">
+          <h2 id="judgment-display" class="text-5xl font-black tracking-wider drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)] scale-75 opacity-0 transition-all duration-100">
+            READY
+          </h2>
+        </div>
+
+        <!-- 3개 제스처 레인 헤더 -->
+        <div class="grid grid-cols-3 gap-4 w-full relative z-10">
+          <div class="bg-indigo-950/60 border border-indigo-500/30 rounded-lg p-2 text-center">
+            <span class="block text-xs text-indigo-300 font-semibold" id="lane-title-left">왼손 (slap)</span>
+            <span class="text-xl">🤚👈</span>
+          </div>
+          <div class="bg-pink-950/60 border border-pink-500/30 rounded-lg p-2 text-center">
+            <span class="block text-xs text-pink-300 font-semibold" id="lane-title-center">양손 (clap)</span>
+            <span class="text-xl">🙌</span>
+          </div>
+          <div class="bg-yellow-950/60 border border-yellow-500/30 rounded-lg p-2 text-center">
+            <span class="block text-xs text-yellow-300 font-semibold" id="lane-title-right">오른손 (shake)</span>
+            <span class="text-xl">👉✋</span>
+          </div>
+        </div>
+
+        <!-- 노트 낙하 영역 -->
+        <div id="notes-container" class="flex-1 w-full relative my-2 overflow-hidden">
+          <div class="absolute inset-y-0 left-1/6 w-0 border-l border-slate-800"></div>
+          <div class="absolute inset-y-0 left-1/2 w-0 border-l border-slate-800"></div>
+          <div class="absolute inset-y-0 right-1/6 w-0 border-l border-slate-800"></div>
+        </div>
+
+        <!-- 판정선 -->
+        <div class="relative w-full z-10">
+          <div class="absolute -top-12 left-1/2 -translate-x-1/2 bg-slate-800/80 border border-slate-700 px-3 py-1 rounded-full text-xs flex items-center space-x-1.5 shadow-md">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
+            <span class="text-slate-300 font-medium">아무동작 안할 때는 <strong class="text-emerald-400" id="label-rest-guide">기타 (Rest)</strong> 상태 유지!</span>
+          </div>
+          <div class="w-full h-14 bg-gradient-to-r from-slate-900/90 via-indigo-950/90 to-slate-900/90 rounded-2xl border-2 border-indigo-400 flex items-center justify-around px-4 shadow-[0_0_20px_rgba(99,102,241,0.3)]">
+            <div class="text-xs text-indigo-300 font-bold tracking-widest animate-pulse">JUDGE ZONE</div>
+            <div class="text-xs text-indigo-300 font-bold tracking-widest animate-pulse">ACTION TIMING!</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 게임 도움말 -->
+      <div class="bg-slate-800/50 rounded-2xl p-4 border border-slate-700 text-xs text-slate-400 flex items-start space-x-3">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-indigo-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <div class="space-y-1">
+          <p class="font-bold text-slate-200">규칙 안내 및 제스처 맵 변경</p>
+          <p>1. 동작 및 모델 대응 정보:</p>
+          <p class="pl-2">- <strong class="text-indigo-400">왼손 노트</strong> : 모델에 정의된 <span class="text-indigo-300 font-semibold" id="match-desc-left">왼손</span> 동작</p>
+          <p class="pl-2">- <strong class="text-pink-400">양손 노트</strong> : 모델에 정의된 <span class="text-pink-300 font-semibold" id="match-desc-center">양손</span> 동작</p>
+          <p class="pl-2">- <strong class="text-yellow-400">오른손 노트</strong> : 모델에 정의된 <span class="text-yellow-300 font-semibold" id="match-desc-right">오른손</span> 동작</p>
+          <p class="pl-2">- <strong class="text-emerald-400">기타 (Rest)</strong> : 대기 상태 (<span class="text-emerald-300 font-semibold" id="match-desc-rest">기타</span> 동작)</p>
+          <p class="mt-1">2. 제한 시간 <strong>60초(1분)</strong> 내에 최대한 많은 콤보와 퍼펙트를 기록해 고득점을 노려보세요!</p>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- 오른쪽: 카메라 + 랭킹 + 정확도 (5컬럼) -->
+    <section class="lg:col-span-5 flex flex-col space-y-4">
+
+      <!-- 웹캠 화면 -->
+      <div class="bg-slate-800 rounded-2xl p-4 border border-slate-700 shadow-md flex flex-col items-center">
+        <h3 class="text-sm font-bold text-slate-300 mb-3 w-full flex justify-between items-center">
+          <span>인식 카메라 피드 (스켈레톤 가이드라인)</span>
+          <span id="camera-status" class="text-xs bg-red-950 text-red-400 border border-red-800/50 px-2 py-0.5 rounded-full">연결 안 됨</span>
+        </h3>
+        <div class="relative w-full aspect-video bg-slate-900 rounded-xl overflow-hidden border border-slate-700 flex items-center justify-center">
+          <div id="webcam-container" class="absolute inset-0 w-full h-full flex items-center justify-center overflow-hidden [&>video]:w-full [&>video]:h-full [&>video]:object-cover [&>canvas]:w-full [&>canvas]:h-full [&>canvas]:object-cover">
+            <div class="text-center p-4">
+              <span class="block text-4xl mb-2">📷</span>
+              <span class="text-xs text-slate-500">모델 로드 후 여기에 카메라가 표시됩니다.</span>
+            </div>
+          </div>
+          <div class="absolute bottom-3 right-3 bg-slate-950/85 px-4 py-2 rounded-lg border border-slate-700 z-10 text-right font-mono">
+            <span class="block text-[10px] text-slate-400 tracking-wider">CURRENT GESTURE</span>
+            <span id="current-gesture-overlay" class="text-lg font-black text-indigo-400">대기 중</span>
+          </div>
+        </div>
+        <div class="w-full mt-3 flex items-center justify-between text-xs text-slate-400 border-t border-slate-700/60 pt-3">
+          <span>가동 디바이스: 전면 웹캠</span>
+          <button id="btn-re-verify" class="text-indigo-400 hover:text-indigo-300 font-bold flex items-center space-x-1">
+            <span>🔄 모델 다시 입력하기</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 🏆 명예의 전당 (TOP 10, Firebase 연동) -->
+      <div class="bg-slate-800 rounded-2xl p-4 border border-slate-700 shadow-md">
+        <div class="flex justify-between items-center mb-3">
+          <h3 class="text-sm font-bold text-yellow-400 flex items-center gap-1.5">
+            <span>🏆 명예의 전당 (TOP 10)</span>
+            <span id="leaderboard-live-dot" class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse hidden" title="실시간 연결됨"></span>
+          </h3>
+          <div class="flex items-center gap-2">
+            <span id="leaderboard-status" class="text-[10px] text-slate-500">로컬 저장 모드</span>
+          </div>
+        </div>
+
+        <div class="bg-slate-900 rounded-xl p-3 border border-slate-700/60 max-h-72 overflow-y-auto">
+          <table class="w-full text-xs text-left">
+            <thead class="sticky top-0 bg-slate-900">
+              <tr class="border-b border-slate-800 text-slate-400">
+                <th class="pb-2 w-10 text-center">순위</th>
+                <th class="pb-2 pl-2">닉네임</th>
+                <th class="pb-2 text-right">점수</th>
+                <th class="pb-2 pr-2 text-right">최대콤보</th>
+              </tr>
+            </thead>
+            <tbody id="leaderboard-body" class="divide-y divide-slate-800/40">
+              <tr>
+                <td colspan="4" class="py-4 text-center text-slate-500 text-xs">랭킹 데이터를 불러오는 중...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 실시간 정확도 측정 바 -->
+      <div class="bg-slate-800 rounded-2xl p-4 border border-slate-700 shadow-md">
+        <h3 class="text-sm font-bold text-slate-300 mb-3">동작별 인식 정확도 (실시간)</h3>
+        <div class="space-y-3" id="class-probabilities">
+          <div class="text-xs text-slate-500 py-2 text-center" id="prob-placeholder">
+            모델이 활성화되면 여기에 동작별 정확도가 실시간으로 측정됩니다.
+          </div>
+        </div>
+      </div>
+
+    </section>
+  </main>
+
+  <!-- 푸터 -->
+  <footer class="bg-slate-950 py-4 text-center text-xs text-slate-500 border-t border-slate-800">
+    <p>© 2026 Teachable Machine Gesture Rhythm Game. Powered by TensorFlow.js</p>
+  </footer>
+
+  <script>
+    // --- 1. 글로벌 게임 변수 ---
+    let model, webcam, maxPredictions;
+    let isModelLoaded = false;
+    let isPlaying = false;
+    let isCameraRunning = false;
+    let isPredicting = false;
+    let isPoseMode = false;
+    let lastPose = null;
+    let animationFrameId = null;
+    let currentGesture = "기타";
+
+    const SMOOTHING_WINDOW_SIZE = 12;
+    let gestureHistory = [];
+
+    let gameTimeRemaining = 60.0;
+    let countdownInterval = null;
+
+    let score = 0;
+    let combo = 0;
+    let maxCombo = 0;
+
+    const customMapping = {
+      "slap": "왼손", "왼손": "왼손",
+      "clap": "양손", "양손": "양손",
+      "shake": "오른손", "오른손": "오른손",
+      "rest": "기타", "기타": "기타", "기타(rest)": "기타"
+    };
+
+    let classList = [];
+    let probabilities = {};
+
+    let mappedClasses = {
+      left: { raw: "왼손", label: "왼손" },
+      center: { raw: "양손", label: "양손" },
+      right: { raw: "오른손", label: "오른손" },
+      rest: { raw: "기타", label: "기타" }
+    };
+
+    let gameLoopInterval = null;
+    let noteSpawnInterval = null;
+    let notes = [];
+    const NOTE_SPEED = 140;
+    let audioCtx = null;
+
+    // Firebase 상태
+    let isFirebaseReady = false;
+    let leaderboardUnsubscribe = null;
+
+    // --- DOM 참조 ---
+    const inputModelUrl = document.getElementById('input-model-url');
+    const btnLoadModel = document.getElementById('btn-load-model');
+    const btnStartGame = document.getElementById('btn-start-game');
+    const loadingSpinner = document.getElementById('loading-spinner');
+    const loadingStatusText = document.getElementById('loading-status-text');
+    const cameraStatus = document.getElementById('camera-status');
+    const webcamContainer = document.getElementById('webcam-container');
+    const currentGestureOverlay = document.getElementById('current-gesture-overlay');
+    const errorGuide = document.getElementById('error-guide');
+    const modelModeBadge = document.getElementById('model-mode-badge');
+    const currentLoadedUrl = document.getElementById('current-loaded-url');
+    const btnReVerify = document.getElementById('btn-re-verify');
+    const scoreDisplay = document.getElementById('score-display');
+    const timerDisplay = document.getElementById('timer-display');
+    const comboDisplay = document.getElementById('combo-display');
+    const maxComboDisplay = document.getElementById('max-combo-display');
+    const judgmentDisplay = document.getElementById('judgment-display');
+    const notesContainer = document.getElementById('notes-container');
+    const gameOverlay = document.getElementById('game-overlay');
+    const overlayTitle = document.getElementById('overlay-title');
+    const overlayDesc = document.getElementById('overlay-desc');
+    const classProbabilitiesContainer = document.getElementById('class-probabilities');
+    const urlInputContainer = document.getElementById('url-input-container');
+    const loadButtonsContainer = document.getElementById('load-buttons-container');
+    const nicknameInputBox = document.getElementById('nickname-input-box');
+    const inputNickname = document.getElementById('input-nickname');
+    const btnSaveScore = document.getElementById('btn-save-score');
+    const leaderboardBody = document.getElementById('leaderboard-body');
+    const saveStatusMsg = document.getElementById('save-status-msg');
+    const leaderboardStatus = document.getElementById('leaderboard-status');
+    const leaderboardLiveDot = document.getElementById('leaderboard-live-dot');
+    const laneTitleLeft = document.getElementById('lane-title-left');
+    const laneTitleCenter = document.getElementById('lane-title-center');
+    const laneTitleRight = document.getElementById('lane-title-right');
+    const labelRestGuide = document.getElementById('label-rest-guide');
+    const matchDescLeft = document.getElementById('match-desc-left');
+    const matchDescCenter = document.getElementById('match-desc-center');
+    const matchDescRight = document.getElementById('match-desc-right');
+    const matchDescRest = document.getElementById('match-desc-rest');
+
+    // --- 2. Firebase 초기화 감지 ---
+    function onFirebaseReady() {
+      isFirebaseReady = true;
+      leaderboardStatus.textContent = "실시간 글로벌 랭킹";
+      leaderboardStatus.className = "text-[10px] text-emerald-400";
+      leaderboardLiveDot.classList.remove('hidden');
+      subscribeLeaderboard();
+    }
+
+    window.addEventListener('firebase-ready', onFirebaseReady);
+
+    // Firebase 로드 실패 시 로컬 모드로 폴백
+    setTimeout(() => {
+      if (!isFirebaseReady) {
+        leaderboardStatus.textContent = "로컬 저장 모드 (Firebase 미설정)";
+        leaderboardStatus.className = "text-[10px] text-yellow-500";
+        loadLeaderboardLocal();
+      }
+    }, 4000);
+
+    // --- 3. 글로벌 랭킹 (Firebase) ---
+    function subscribeLeaderboard() {
+      if (!window._fbDb) return;
+      try {
+        const scoresRef = window._fbQuery(
+          window._fbRef(window._fbDb, 'scores'),
+          window._fbOrderByChild('score'),
+          window._fbLimitToLast(10)
+        );
+        window._fbOnValue(scoresRef, (snapshot) => {
+          const data = snapshot.val();
+          if (!data) {
+            renderLeaderboard([]);
+            return;
+          }
+          // 점수 높은 순 정렬
+          const entries = Object.values(data).sort((a, b) => b.score - a.score);
+          renderLeaderboard(entries);
+        });
+      } catch (e) {
+        console.warn("Firebase 리더보드 구독 실패, 로컬 모드로 전환:", e);
+        loadLeaderboardLocal();
+      }
+    }
+
+    async function saveScoreToFirebase(nickname, scoreVal, maxComboVal) {
+      if (!window._fbDb) return false;
+      try {
+        const scoresRef = window._fbRef(window._fbDb, 'scores');
+        await window._fbPush(scoresRef, {
+          nickname: nickname,
+          score: scoreVal,
+          maxCombo: maxComboVal,
+          date: new Date().toISOString()
+        });
+        return true;
+      } catch (e) {
+        console.warn("Firebase 저장 실패:", e);
+        return false;
+      }
+    }
+
+    // --- 4. 로컬 랭킹 폴백 ---
+    function loadLeaderboardLocal() {
+      const data = JSON.parse(localStorage.getItem('tm_rhythm_leaderboard')) || [];
+      const sorted = data.sort((a, b) => b.score - a.score).slice(0, 10);
+      renderLeaderboard(sorted);
+    }
+
+    function saveScoreLocal(nickname, scoreVal, maxComboVal) {
+      const data = JSON.parse(localStorage.getItem('tm_rhythm_leaderboard')) || [];
+      data.push({ nickname, score: scoreVal, maxCombo: maxComboVal, date: new Date().toISOString() });
+      localStorage.setItem('tm_rhythm_leaderboard', JSON.stringify(data));
+      loadLeaderboardLocal();
+    }
+
+    // --- 5. 랭킹 테이블 렌더링 ---
+    function renderLeaderboard(entries) {
+      leaderboardBody.innerHTML = "";
+
+      if (!entries || entries.length === 0) {
+        leaderboardBody.innerHTML = `
+          <tr>
+            <td colspan="4" class="py-4 text-center text-slate-500 text-xs">아직 등록된 랭킹 기록이 없습니다.<br>첫 번째 도전자가 되어보세요!</td>
+          </tr>
+        `;
+        return;
+      }
+
+      entries.forEach((item, index) => {
+        let rankDisplay = `${index + 1}`;
+        let rankClass = "text-slate-300";
+        if (index === 0) { rankDisplay = "🥇"; rankClass = "text-yellow-400 text-base"; }
+        else if (index === 1) { rankDisplay = "🥈"; rankClass = "text-slate-300 text-base"; }
+        else if (index === 2) { rankDisplay = "🥉"; rankClass = "text-amber-700 text-base"; }
+
+        const row = document.createElement('tr');
+        row.className = `rank-row-anim hover:bg-slate-800/30 transition border-b border-slate-800/30`;
+        row.style.animationDelay = `${index * 40}ms`;
+        row.innerHTML = `
+          <td class="py-2 text-center font-bold ${rankClass}">${rankDisplay}</td>
+          <td class="py-2 pl-2 font-semibold text-slate-200">${escapeHtml(item.nickname)}</td>
+          <td class="py-2 text-right font-bold text-indigo-400">${Number(item.score).toLocaleString()}</td>
+          <td class="py-2 pr-2 text-right text-pink-500 font-bold">${item.maxCombo}x</td>
+        `;
+        leaderboardBody.appendChild(row);
+      });
+    }
+
+    // --- 6. 효과음 ---
+    function initAudio() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+    }
+
+    function playSound(type) {
+      if (!audioCtx) return;
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      if (type === 'perfect') {
+        osc.frequency.setValueAtTime(523.25, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.2);
+      } else if (type === 'good') {
+        osc.frequency.setValueAtTime(392, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(523.25, audioCtx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.15);
+      } else if (type === 'miss') {
+        osc.frequency.setValueAtTime(180, audioCtx.currentTime);
+        osc.frequency.linearRampToValueAtTime(90, audioCtx.currentTime + 0.25);
+        gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.3);
+      } else if (type === 'start') {
+        osc.frequency.setValueAtTime(330, audioCtx.currentTime);
+        osc.frequency.setValueAtTime(440, audioCtx.currentTime + 0.1);
+        osc.frequency.setValueAtTime(554, audioCtx.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.4);
+      } else if (type === 'gameover') {
+        osc.frequency.setValueAtTime(523.25, audioCtx.currentTime);
+        osc.frequency.linearRampToValueAtTime(261.63, audioCtx.currentTime + 0.5);
+        gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.6);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.6);
+      }
+    }
+
+    // --- 7. 웹캠 & 모델 초기화 ---
+    async function cleanupPreviousState() {
+      isCameraRunning = false;
+      isPredicting = false;
+      isModelLoaded = false;
+      lastPose = null;
+      gestureHistory = [];
+
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+      if (webcam) {
+        try { await webcam.stop(); } catch (err) {}
+      }
+      webcamContainer.innerHTML = `
+        <div class="text-center p-4">
+          <span class="block text-4xl mb-2">📷</span>
+          <span class="text-xs text-slate-500">모델 로드 후 여기에 카메라가 표시됩니다.</span>
+        </div>
+      `;
+      cameraStatus.textContent = "연결 안 됨";
+      cameraStatus.className = "text-xs bg-red-950 text-red-400 border border-red-800/50 px-2 py-0.5 rounded-full";
+      modelModeBadge.textContent = "감지 대기 중";
+      modelModeBadge.className = "text-yellow-400 font-bold";
+      btnStartGame.disabled = true;
+      btnStartGame.className = "w-full py-3 bg-slate-600 text-slate-400 font-bold rounded-xl cursor-not-allowed transition duration-300";
+      btnStartGame.textContent = "모델 연동을 먼저 완료해주세요";
+    }
+
+    btnLoadModel.addEventListener('click', async () => {
+      initAudio();
+      errorGuide.classList.add('hidden');
+      btnLoadModel.disabled = true;
+      loadingSpinner.classList.remove('hidden');
+      btnLoadModel.classList.add('opacity-50', 'cursor-not-allowed');
+
+      loadingStatusText.textContent = "이전 가동 리소스를 초기화하는 중...";
+      await cleanupPreviousState();
+
+      let rawUrl = inputModelUrl.value.trim();
+      if (!rawUrl.endsWith('/')) rawUrl += '/';
+
+      try {
+        loadingStatusText.textContent = "인공지능 모델 데이터를 수신하는 중...";
+        const modelURL = rawUrl + "model.json";
+        const metadataURL = rawUrl + "metadata.json";
+
+        const metaResponse = await fetch(metadataURL);
+        if (!metaResponse.ok) throw new Error("모델 메타데이터를 불러오지 못했습니다.");
+        const metadata = await metaResponse.json();
+
+        classList = metadata.classes || ["왼손", "양손", "오른손", "기타"];
+
+        if (metadata.packageName && metadata.packageName.includes('pose')) {
+          isPoseMode = true;
+          modelModeBadge.textContent = "포즈 인식 (Pose)";
+          modelModeBadge.className = "text-yellow-400 font-bold bg-yellow-950/50 border border-yellow-800/85 px-2 py-0.5 rounded-full text-xs";
+        } else {
+          isPoseMode = false;
+          modelModeBadge.textContent = "이미지 분류 (Image)";
+          modelModeBadge.className = "text-indigo-400 font-bold bg-indigo-950/50 border border-indigo-800/85 px-2 py-0.5 rounded-full text-xs";
+        }
+
+        loadingStatusText.textContent = "지능형 제스처 판정 레인을 조율하는 중...";
+        determineClassMappings();
+
+        if (isPoseMode) {
+          model = await tmPose.load(modelURL, metadataURL);
+        } else {
+          model = await tmImage.load(modelURL, metadataURL);
+        }
+        maxPredictions = model.getTotalClasses();
+
+        buildDynamicProbabilityBars();
+
+        loadingStatusText.textContent = "웹캠 장치를 연동하는 중...";
+        const flip = true;
+
+        if (isPoseMode) {
+          webcam = new tmPose.Webcam(320, 240, flip);
+        } else {
+          webcam = new tmImage.Webcam(320, 240, flip);
+        }
+
+        await webcam.setup({ facingMode: "user" });
+        await webcam.play();
+
+        isCameraRunning = true;
+        isPredicting = false;
+        lastPose = null;
+        gestureHistory = [];
+
+        animationFrameId = window.requestAnimationFrame(loop);
+
+        webcamContainer.innerHTML = "";
+        webcamContainer.appendChild(webcam.canvas);
+        webcam.canvas.classList.add('w-full', 'h-full', 'object-cover');
+
+        isModelLoaded = true;
+        currentLoadedUrl.textContent = rawUrl;
+
+        cameraStatus.textContent = "작동 중";
+        cameraStatus.className = "text-xs bg-green-950 text-green-400 border border-green-800/50 px-2 py-0.5 rounded-full";
+
+        loadingSpinner.classList.add('hidden');
+        btnLoadModel.disabled = false;
+        btnLoadModel.classList.remove('opacity-50', 'cursor-not-allowed');
+        btnLoadModel.textContent = "🔄 다른 모델 다시 로드";
+
+        btnStartGame.removeAttribute('disabled');
+        btnStartGame.className = "w-full py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white font-extrabold text-lg rounded-xl shadow-lg shadow-emerald-500/20 cursor-pointer animate-pulse";
+        btnStartGame.textContent = "🎮 게임 시작하기 (60초 타임어택)";
+
+        overlayTitle.textContent = "카메라 및 포즈 동기화 완료!";
+        overlayDesc.innerHTML = "우측 피드에 관절 가이드 라인이 연출되는지 확인해보세요.<br>준비가 끝나셨다면 아래 [게임 시작하기]를 클릭하세요!";
+
+      } catch (e) {
+        console.error("동적 카메라 및 모델 장치 연동 실패:", e);
+        loadingSpinner.classList.add('hidden');
+        btnLoadModel.disabled = false;
+        btnLoadModel.classList.remove('opacity-50', 'cursor-not-allowed');
+        btnLoadModel.textContent = "다시 로드 시도하기";
+        errorGuide.classList.remove('hidden');
+      }
+    });
+
+    function determineClassMappings() {
+      mappedClasses = {
+        left: { raw: "왼손", label: "왼손" },
+        center: { raw: "양손", label: "양손" },
+        right: { raw: "오른손", label: "오른손" },
+        rest: { raw: "기타", label: "기타" }
+      };
+
+      classList.forEach(className => {
+        const lower = className.toLowerCase();
+        if (lower.includes('기타') || lower.includes('rest') || lower.includes('대기') || lower.includes('idle')) {
+          mappedClasses.rest.raw = className;
+          mappedClasses.rest.label = customMapping[lower] || className;
+        } else if (lower.includes('왼') || lower.includes('left') || lower.includes('slap')) {
+          mappedClasses.left.raw = className;
+          mappedClasses.left.label = customMapping[lower] || className;
+        } else if (lower.includes('양') || lower.includes('both') || lower.includes('clap') || lower.includes('double')) {
+          mappedClasses.center.raw = className;
+          mappedClasses.center.label = customMapping[lower] || className;
+        } else if (lower.includes('오른') || lower.includes('right') || lower.includes('shake')) {
+          mappedClasses.right.raw = className;
+          mappedClasses.right.label = customMapping[lower] || className;
+        }
+      });
+
+      laneTitleLeft.textContent = `왼손 (${mappedClasses.left.raw})`;
+      laneTitleCenter.textContent = `양손 (${mappedClasses.center.raw})`;
+      laneTitleRight.textContent = `오른손 (${mappedClasses.right.raw})`;
+      labelRestGuide.textContent = `기타 (${mappedClasses.rest.raw})`;
+      matchDescLeft.textContent = mappedClasses.left.raw;
+      matchDescCenter.textContent = mappedClasses.center.raw;
+      matchDescRight.textContent = mappedClasses.right.raw;
+      matchDescRest.textContent = mappedClasses.rest.raw;
+    }
+
+    function buildDynamicProbabilityBars() {
+      classProbabilitiesContainer.innerHTML = "";
+      classList.forEach((className, index) => {
+        const lowerName = className.toLowerCase();
+        probabilities[lowerName] = 0;
+
+        let barColor = "bg-indigo-500";
+        let labelColor = "text-indigo-400";
+        if (lowerName === mappedClasses.center.raw.toLowerCase()) { barColor = "bg-pink-500"; labelColor = "text-pink-400"; }
+        else if (lowerName === mappedClasses.right.raw.toLowerCase()) { barColor = "bg-yellow-500"; labelColor = "text-yellow-400"; }
+        else if (lowerName === mappedClasses.rest.raw.toLowerCase()) { barColor = "bg-emerald-500"; labelColor = "text-emerald-400"; }
+
+        let korName = customMapping[lowerName] ? `${customMapping[lowerName]} (${className})` : className;
+
+        classProbabilitiesContainer.insertAdjacentHTML('beforeend', `
+          <div>
+            <div class="flex justify-between text-xs mb-1">
+              <span class="text-slate-300 font-medium">${korName}</span>
+              <span id="prob-display-${index}" class="${labelColor} font-bold">0%</span>
+            </div>
+            <div class="w-full bg-slate-900 h-2 rounded-full overflow-hidden">
+              <div id="bar-fill-${index}" class="${barColor} h-full w-0 transition-all duration-75"></div>
+            </div>
+          </div>
+        `);
+      });
+    }
+
+    async function loop() {
+      if (!isCameraRunning) return;
+      try {
+        webcam.update();
+        if (isPoseMode && lastPose) drawPoseSkeleton(lastPose);
+        if (!isPredicting) {
+          isPredicting = true;
+          await predict();
+          isPredicting = false;
+        }
+      } catch (err) {
+        isPredicting = false;
+      }
+      animationFrameId = window.requestAnimationFrame(loop);
+    }
+
+    async function predict() {
+      if (!model || !webcam.canvas) return;
+      try {
+        let prediction;
+        if (isPoseMode) {
+          const { pose, posenetOutput } = await model.estimatePose(webcam.canvas);
+          lastPose = pose;
+          prediction = await model.predict(posenetOutput);
+        } else {
+          prediction = await model.predictTopK(webcam.canvas, maxPredictions);
+        }
+
+        let highestProb = 0;
+        let highestClass = mappedClasses.rest.raw.toLowerCase();
+
+        classList.forEach(cls => { probabilities[cls.toLowerCase()] = 0; });
+
+        for (let i = 0; i < prediction.length; i++) {
+          const rawClassName = prediction[i].className;
+          const classNameLower = rawClassName.toLowerCase();
+          const probability = prediction[i].probability;
+          const classIndex = classList.indexOf(rawClassName);
+
+          if (classIndex !== -1) {
+            const probDisplay = document.getElementById(`prob-display-${classIndex}`);
+            const barFill = document.getElementById(`bar-fill-${classIndex}`);
+            if (probDisplay && barFill) {
+              const percent = Math.round(probability * 100);
+              probDisplay.textContent = `${percent}%`;
+              barFill.style.width = `${percent}%`;
+            }
+          }
+          probabilities[classNameLower] = probability;
+          if (probability > highestProb) {
+            highestProb = probability;
+            highestClass = classNameLower;
+          }
+        }
+
+        let currentInstantGesture = mappedClasses.rest.raw.toLowerCase();
+        if (highestProb > 0.50) currentInstantGesture = highestClass;
+
+        gestureHistory.push(currentInstantGesture);
+        if (gestureHistory.length > SMOOTHING_WINDOW_SIZE) gestureHistory.shift();
+
+        const voteCounts = {};
+        let selectedSmoothedGesture = mappedClasses.rest.raw.toLowerCase();
+        let maxVotes = 0;
+
+        for (let i = 0; i < gestureHistory.length; i++) {
+          const g = gestureHistory[i];
+          voteCounts[g] = (voteCounts[g] || 0) + 1;
+          if (voteCounts[g] > maxVotes) {
+            maxVotes = voteCounts[g];
+            selectedSmoothedGesture = g;
+          }
+        }
+
+        currentGesture = selectedSmoothedGesture;
+
+        let displayLabel = "기타";
+        if (currentGesture === mappedClasses.left.raw.toLowerCase()) displayLabel = "왼손";
+        else if (currentGesture === mappedClasses.center.raw.toLowerCase()) displayLabel = "양손";
+        else if (currentGesture === mappedClasses.right.raw.toLowerCase()) displayLabel = "오른손";
+
+        currentGestureOverlay.textContent = displayLabel;
+
+        if (currentGesture === mappedClasses.left.raw.toLowerCase()) currentGestureOverlay.className = "text-lg font-black text-indigo-400 animate-pulse";
+        else if (currentGesture === mappedClasses.center.raw.toLowerCase()) currentGestureOverlay.className = "text-lg font-black text-pink-400 animate-pulse";
+        else if (currentGesture === mappedClasses.right.raw.toLowerCase()) currentGestureOverlay.className = "text-lg font-black text-yellow-400 animate-pulse";
+        else currentGestureOverlay.className = "text-lg font-black text-emerald-400";
+      } catch (err) {}
+    }
+
+    function drawPoseSkeleton(pose) {
+      if (!webcam.canvas) return;
+      const ctx = webcam.canvas.getContext("2d");
+      if (!ctx || !pose) return;
+      const minPartConfidence = 0.5;
+      tmPose.drawKeypoints(pose.keypoints, minPartConfidence, ctx);
+      tmPose.drawSkeleton(pose.keypoints, minPartConfidence, ctx);
+    }
+
+    // --- 8. 게임 엔진 ---
+    btnStartGame.addEventListener('click', () => {
+      initAudio();
+      if (!isModelLoaded) return;
+      startGame();
+    });
+
+    btnReVerify.addEventListener('click', () => {
+      nicknameInputBox.classList.add('hidden');
+      urlInputContainer.classList.remove('hidden');
+      loadButtonsContainer.classList.remove('hidden');
+      gameOverlay.classList.remove('hidden');
+      overlayTitle.textContent = "티처블 머신 연동하기 🎮";
+      overlayDesc.textContent = "새로운 티처블 머신 주소를 입력하고 장치를 연동하세요.";
+    });
+
+    function startGame() {
+      isPlaying = true;
+      score = 0;
+      combo = 0;
+      maxCombo = 0;
+      notes = [];
+      notesContainer.innerHTML = '';
+      gestureHistory = [];
+
+      gameTimeRemaining = 60.0;
+      timerDisplay.textContent = "60.0s";
+      timerDisplay.className = "text-3xl font-extrabold text-emerald-400";
+      scoreDisplay.textContent = "000,000";
+      comboDisplay.textContent = "0";
+      maxComboDisplay.textContent = "0";
+
+      gameOverlay.classList.add('hidden');
+      playSound('start');
+      triggerAdjustmentUI("START!", "text-yellow-400");
+
+      let lastTime = performance.now();
+      gameLoopInterval = setInterval(() => {
+        const now = performance.now();
+        const dt = (now - lastTime) / 1000;
+        lastTime = now;
+        updateNotes(dt);
+      }, 16);
+
+      spawnPatternNotes();
+
+      countdownInterval = setInterval(() => {
+        gameTimeRemaining -= 0.1;
+        if (gameTimeRemaining <= 0) {
+          gameTimeRemaining = 0;
+          timerDisplay.textContent = "0.0s";
+          stopGame();
+        } else {
+          timerDisplay.textContent = `${gameTimeRemaining.toFixed(1)}s`;
+          if (gameTimeRemaining <= 10.0) {
+            timerDisplay.className = "text-3xl font-extrabold text-red-500 animate-ping";
+          }
+        }
+      }, 100);
+    }
+
+    function spawnPatternNotes() {
+      if (!isPlaying) return;
+      const types = ['left', 'center', 'right'];
+      const randomType = types[Math.floor(Math.random() * types.length)];
+      let lane = 0;
+      if (randomType === 'center') lane = 1;
+      else if (randomType === 'right') lane = 2;
+      createNoteElement(randomType, lane);
+      const delay = Math.random() * 950 + 650;
+      noteSpawnInterval = setTimeout(spawnPatternNotes, delay);
+    }
+
+    function createNoteElement(type, lane) {
+      const noteId = 'note_' + Date.now() + '_' + Math.floor(Math.random()*100);
+      const noteEl = document.createElement('div');
+      const lanePercent = [8, 41, 73];
+      const leftPos = lanePercent[lane];
+
+      let colorClass = "from-indigo-500 to-indigo-600 shadow-indigo-500/50 border-indigo-300";
+      let displayLabel = "왼손 (LEFT)";
+      if (type === 'center') { colorClass = "from-pink-500 to-pink-600 shadow-pink-500/50 border-pink-300"; displayLabel = "양손 (CENTER)"; }
+      else if (type === 'right') { colorClass = "from-yellow-500 to-yellow-600 shadow-yellow-500/50 border-yellow-300"; displayLabel = "오른손 (RIGHT)"; }
+
+      noteEl.id = noteId;
+      noteEl.className = `absolute w-24 h-10 bg-gradient-to-r ${colorClass} border-2 rounded-xl flex items-center justify-center font-extrabold text-[11px] tracking-tight text-white shadow-lg select-none pointer-events-none`;
+      noteEl.style.left = `${leftPos}%`;
+      noteEl.style.top = `-40px`;
+      noteEl.innerHTML = displayLabel;
+      notesContainer.appendChild(noteEl);
+
+      notes.push({ id: noteId, type, lane, element: noteEl, y: -40, hitTested: false });
+    }
+
+    function updateNotes(dt) {
+      const parentHeight = notesContainer.clientHeight;
+      const targetZoneY = parentHeight - 60;
+
+      for (let i = notes.length - 1; i >= 0; i--) {
+        const note = notes[i];
+        note.y += NOTE_SPEED * dt;
+        note.element.style.top = `${note.y}px`;
+        const distanceToTarget = Math.abs(note.y - targetZoneY);
+
+        if (!note.hitTested) {
+          let isMatchingAction = false;
+          if (note.type === 'left' && currentGesture === mappedClasses.left.raw.toLowerCase()) isMatchingAction = true;
+          else if (note.type === 'center' && currentGesture === mappedClasses.center.raw.toLowerCase()) isMatchingAction = true;
+          else if (note.type === 'right' && currentGesture === mappedClasses.right.raw.toLowerCase()) isMatchingAction = true;
+
+          if (isMatchingAction) {
+            if (distanceToTarget < 25) handleJudgment('perfect', note);
+            else if (distanceToTarget < 55) handleJudgment('good', note);
+          }
+        }
+
+        if (note.y > targetZoneY + 60) handleJudgment('miss', note);
+      }
+    }
+
+    function handleJudgment(grade, note) {
+      if (grade === 'perfect') {
+        score += 1000 + (combo * 50);
+        combo++;
+        triggerAdjustmentUI("PERFECT", "text-teal-400 font-extrabold scale-110");
+        playSound('perfect');
+        removeNote(note.id);
+      } else if (grade === 'good') {
+        score += 500 + (combo * 20);
+        combo++;
+        triggerAdjustmentUI("GOOD", "text-indigo-300 font-bold");
+        playSound('good');
+        removeNote(note.id);
+      } else if (grade === 'miss') {
+        combo = 0;
+        triggerAdjustmentUI("MISS", "text-red-500 font-medium scale-90");
+        playSound('miss');
+        removeNote(note.id);
+      }
+
+      if (combo > maxCombo) {
+        maxCombo = combo;
+        maxComboDisplay.textContent = maxCombo;
+      }
+
+      scoreDisplay.textContent = score.toLocaleString('ko-KR', { minimumIntegerDigits: 6, useGrouping: false });
+      comboDisplay.textContent = combo;
+      comboDisplay.className = combo > 5
+        ? "text-3xl font-extrabold text-pink-500 animate-bounce scale-110"
+        : "text-3xl font-extrabold text-pink-500";
+    }
+
+    function triggerAdjustmentUI(text, colorClasses) {
+      if (!judgmentDisplay) return;
+      judgmentDisplay.className = `text-5xl font-black tracking-wider drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)] transition-all duration-75 ${colorClasses}`;
+      judgmentDisplay.textContent = text;
+      setTimeout(() => { judgmentDisplay.classList.add('opacity-100'); judgmentDisplay.classList.remove('scale-75'); }, 10);
+      setTimeout(() => { judgmentDisplay.classList.add('opacity-0', 'scale-75'); judgmentDisplay.classList.remove('opacity-100'); }, 500);
+    }
+
+    function removeNote(id) {
+      const idx = notes.findIndex(n => n.id === id);
+      if (idx !== -1) {
+        const note = notes[idx];
+        if (note.element && note.element.parentNode) note.element.parentNode.removeChild(note.element);
+        notes.splice(idx, 1);
+      }
+    }
+
+    function stopGame() {
+      isPlaying = false;
+      clearInterval(gameLoopInterval);
+      clearInterval(countdownInterval);
+      clearTimeout(noteSpawnInterval);
+
+      notes.forEach(n => {
+        if (n.element && n.element.parentNode) n.element.parentNode.removeChild(n.element);
+      });
+      notes = [];
+
+      playSound('gameover');
+
+      gameOverlay.classList.remove('hidden');
+      urlInputContainer.classList.add('hidden');
+      loadButtonsContainer.classList.add('hidden');
+      nicknameInputBox.classList.remove('hidden');
+      inputNickname.value = "";
+      saveStatusMsg.classList.add('hidden');
+
+      overlayTitle.innerHTML = `⏰ 타임업! 플레이 종료!<br><span class="text-indigo-400 text-3xl font-black mt-2 block">최종 점수: ${score.toLocaleString()}점</span>`;
+      overlayDesc.innerHTML = `
+        <div class="bg-slate-900/60 p-4 rounded-xl border border-slate-700/50 space-y-2 text-sm mt-2 text-slate-300">
+          <p>🔥 최고 연타 콤보: <strong class="text-pink-400">${maxCombo} Combo</strong></p>
+          <p>닉네임을 등록하고 <strong class="text-yellow-400">전 세계 랭킹</strong>에 도전해보세요!</p>
+        </div>
+      `;
+      btnStartGame.textContent = "다시 도전하기! (1분 타임어택)";
+    }
+
+    // --- 9. 점수 저장 버튼 ---
+    btnSaveScore.addEventListener('click', async () => {
+      const nickname = inputNickname.value.trim();
+      if (!nickname) {
+        alert("닉네임을 입력해 주세요!");
+        return;
+      }
+
+      btnSaveScore.disabled = true;
+      btnSaveScore.textContent = "저장 중...";
+      saveStatusMsg.classList.remove('hidden');
+      saveStatusMsg.textContent = "점수를 등록하는 중입니다...";
+      saveStatusMsg.className = "text-[10px] text-slate-400";
+
+      let saved = false;
+      if (isFirebaseReady) {
+        saved = await saveScoreToFirebase(nickname, score, maxCombo);
+      }
+
+      if (!saved) {
+        saveScoreLocal(nickname, score, maxCombo);
+      }
+
+      btnSaveScore.disabled = false;
+      btnSaveScore.textContent = "등록";
+
+      saveStatusMsg.textContent = saved ? "✅ 글로벌 랭킹에 등록되었습니다!" : "✅ 로컬 랭킹에 등록되었습니다.";
+      saveStatusMsg.className = "text-[10px] text-emerald-400";
+
+      setTimeout(() => {
+        nicknameInputBox.classList.add('hidden');
+        urlInputContainer.classList.remove('hidden');
+        loadButtonsContainer.classList.remove('hidden');
+        overlayTitle.textContent = "명예의 전당 등록 완료! 🎉";
+        overlayDesc.innerHTML = "새 기록이 명예의 전당에 정상적으로 반영되었습니다.<br>한 번 더 도전하려면 아래 버튼을 클릭하세요!";
+      }, 1500);
+    });
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Escape' && isPlaying) stopGame();
+    });
+  </script>
+</body>
+</html>
